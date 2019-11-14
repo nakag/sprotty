@@ -24,14 +24,20 @@ import { EMPTY_ROOT } from "../../base/model/smodel-factory";
 import { SModelElement, SModelElementSchema, SModelRoot, SModelRootSchema } from "../../base/model/smodel";
 import { CommandExecutionContext } from "../../base/commands/command";
 import { AnimationFrameSyncer } from "../../base/animations/animation-frame-syncer";
-import { CompoundAnimation } from "../../base/animations/animation";
-import { SNodeSchema, SGraphSchema } from "../../graph/sgraph";
+import { CompoundAnimation, Animation } from "../../base/animations/animation";
+import { SNodeSchema, SGraphSchema, SEdgeSchema, SEdge } from "../../graph/sgraph";
 import { SGraphFactory } from "../../graph/sgraph-factory";
 import { FadeAnimation } from "../../features/fade/fade";
 import { MoveAnimation } from "../../features/move/move";
-import { UpdateModelCommand } from "./update-model";
+import { UpdateModelCommand, UpdateModelAction } from "./update-model";
 import { ModelMatcher } from "./model-matching";
+import { ManhattanEdgeRouter } from "../routing/manhattan-edge-router";
 import defaultModule from "../../base/di.config";
+import { EdgeMorphAnimation } from './edge-morph-animation';
+import { Point } from '../../utils/geometry';
+import { EdgeRouterRegistry } from '../routing/routing';
+import { AnchorComputerRegistry } from '../routing/anchor';
+import { ManhattanRectangularAnchor } from '../routing/manhattan-anchors'
 
 function compare(expected: SModelElementSchema, actual: SModelElement) {
     for (const p in expected) {
@@ -107,6 +113,11 @@ describe('UpdateModelCommand', () => {
     });
 
     class TestUpdateModelCommand extends UpdateModelCommand {
+        constructor(action: UpdateModelAction, edgeRouterRegistry?: EdgeRouterRegistry) {
+            super(action);
+            this.edgeRouterRegistry = edgeRouterRegistry;
+        }
+
         testAnimation(root: SModelRoot, execContext: CommandExecutionContext) {
             this.oldRoot = root;
             this.newRoot = execContext.modelFactory.createRoot(this.action.newRoot!);
@@ -342,4 +353,105 @@ describe('UpdateModelCommand', () => {
         };
         compare(expected, newModel);
     });
+
+    it('morphs edge', () => {
+        const edgeId = 'edge'
+        const edgeRouterRegistry = createEdgeRouterRegistry();
+        context.root = graphFactory.createRoot(
+            newModelWithEdge(edgeId, [{ x: 64, y: 0 }, { x: 64, y: 128 }]));
+            // connects node1 left with node2 right at respective midpoints
+        const command1 = new TestUpdateModelCommand({
+            kind: UpdateModelCommand.KIND,
+            animate: false,
+            newRoot: newModelWithEdge(edgeId, [{ x: 136, y: 0 }])
+        }, edgeRouterRegistry);
+        const animation1 = command1.testAnimation(context.root, context);
+        expect(animation1).to.be.instanceof(EdgeMorphAnimation);
+        if (animation1 instanceof Animation) {
+            animation1.tween(0, context);
+            const edge = context.root.index.getById(edgeId) as SEdge;
+            expect(edge.routingPoints).to.be.eql([
+                { x: 64, y: 0 },
+                { x: 64, y: 128 }
+            ]);
+            animation1.tween(0.5, context);
+            expect(edge.routingPoints).to.be.eql([
+                { x: 100, y: 0 }, // midpoint between 64:0 and 136:0
+                { x: 100, y: 94 }  // midpoint between 64:128 and the interpolated 136:60
+            ]);
+            animation1.tween(1, context);
+            expect(edge.routingPoints).to.be.eql([
+                {x: 136, y: 0}
+            ]);
+        }
+        const command2 = new TestUpdateModelCommand({
+            kind: UpdateModelCommand.KIND,
+            animate: false,
+            newRoot: newModelWithEdge(edgeId, [{ x: 32, y: 0 }, { x: 32, y: 32 }, { x: 64, y: 32 }, { x:64, y: 128 }])
+        }, edgeRouterRegistry);
+        const animation2 = command2.testAnimation(context.root, context);
+        expect(animation2).to.be.instanceof(EdgeMorphAnimation);
+        if (animation2 instanceof Animation) {
+            animation2.tween(0, context);
+            const edge = context.root.index.getById(edgeId) as SEdge;
+            expect(edge.routingPoints).to.be.eql([
+                { x: 68, y: 0 },     // interpolated between 0:0 and 136:0
+                { x: 136, y: 0 },    // original
+                { x: 136, y: 40 },    // interpolated between 136:0 and 136:120 (33%)
+                { x: 136, y: 80 },   // interpolated between 136:0 and 136:120 (66%)
+            ]);
+            animation2.tween(0.5, context);
+            expect(edge.routingPoints).to.be.eql([
+                { x: 50, y: 0 },     // midpoint between 32:0 and 68:0
+                { x: 84, y: 16 },    // midpoint between 32:32 and 136:0
+                { x: 100, y: 36 },   // midpoint between 64:32 and 136:40
+                { x: 100, y: 104 },  // midpoint between 64:128 and 136:80
+            ]);
+            animation2.tween(1, context);
+            expect(edge.routingPoints).to.be.eql([
+                { x: 32, y: 0 },
+                { x: 32, y: 32 },
+                { x: 64, y: 32 },
+                { x: 64, y: 128 }
+            ]);
+        }
+    });
+
+    function newModelWithEdge(edgeId: string, routingPoints: Point[]): SModelRootSchema {
+        return {
+            type: 'graph',
+            id: 'model',
+            children: [
+                {
+                    type: 'node',
+                    id: 'node1',
+                    position: { x: -16, y: -8 },
+                    size: { width: 16, height: 16 }
+                    // mid-right is at 0:0
+                } as SNodeSchema,
+                {
+                    type: 'node',
+                    id: 'node2',
+                    position: { x: 128, y: 120 },
+                    size: { width: 16, height: 16 }
+                    // mid-left is at 128:128
+                } as SNodeSchema,
+                {
+                    type: 'edge',
+                    id: edgeId,
+                    routerKind: ManhattanEdgeRouter.KIND,
+                    routingPoints,
+                    sourceId: 'node1',
+                    targetId: 'node2'
+                } as SEdgeSchema
+            ]
+        }
+    }
+
+    function createEdgeRouterRegistry(): EdgeRouterRegistry {
+        const anchorRegistry = new AnchorComputerRegistry([new ManhattanRectangularAnchor()]);
+        const router = new ManhattanEdgeRouter();
+        router.anchorRegistry = anchorRegistry;
+        return new EdgeRouterRegistry([router]);
+    }
 });

@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable, inject } from "inversify";
+import { injectable, inject, optional } from "inversify";
 import { isValidDimension, almostEquals } from "../../utils/geometry";
 import { Animation, CompoundAnimation } from '../../base/animations/animation';
 import { CommandExecutionContext, CommandReturn, Command } from '../../base/commands/command';
@@ -31,6 +31,9 @@ import { MatchResult, ModelMatcher, Match, forEachMatch } from "./model-matching
 import { ResolvedElementResize, ResizeAnimation } from '../bounds/resize';
 import { TYPES } from "../../base/types";
 import { isViewport } from "../viewport/model";
+import { EdgeRouterRegistry, RoutedPoint } from "../routing/routing";
+import { SRoutableElement } from "../routing/model";
+import { ResolvedEdgeMorph, EdgeMorphAnimation } from "./edge-morph-animation";
 
 /**
  * Sent from the model source to the client in order to update the model. If no model is present yet,
@@ -56,6 +59,7 @@ export interface UpdateAnimationData {
     fades: ResolvedElementFade[]
     moves?: ResolvedElementMove[]
     resizes?: ResolvedElementResize[]
+    edgeMorphs?: ResolvedEdgeMorph[]
 }
 
 @injectable()
@@ -64,6 +68,8 @@ export class UpdateModelCommand extends Command {
 
     oldRoot: SModelRoot;
     newRoot: SModelRoot;
+
+    @inject(EdgeRouterRegistry)@optional() edgeRouterRegistry?: EdgeRouterRegistry;
 
     constructor(@inject(TYPES.Action) protected readonly action: UpdateModelAction) {
         super();
@@ -237,6 +243,16 @@ export class UpdateModelCommand extends Command {
                 });
             }
         }
+        if (left instanceof SRoutableElement && right instanceof SRoutableElement && this.edgeRouterRegistry) {
+            if (animationData.edgeMorphs === undefined)
+                animationData.edgeMorphs = [];
+            animationData.edgeMorphs.push({
+                edge: right,
+                fromRoutingPoints: this.route(left),
+                toRoutingPoints: this.route(right),
+                finalRoutingPoints: right.routingPoints
+            });
+        }
         if (isSelectable(left) && isSelectable(right)) {
             right.selected = left.selected;
         }
@@ -247,6 +263,11 @@ export class UpdateModelCommand extends Command {
             right.scroll = left.scroll;
             right.zoom = left.zoom;
         }
+    }
+
+    protected route(edge: SRoutableElement): RoutedPoint[] {
+        const router = this.edgeRouterRegistry!.get(edge.routerKind);
+        return router.route(edge);
     }
 
     protected createAnimations(data: UpdateAnimationData, root: SModelRoot, context: CommandExecutionContext): Animation[] {
@@ -267,6 +288,13 @@ export class UpdateModelCommand extends Command {
                 resizesMap.set(resize.element.id, resize);
             }
             animations.push(new ResizeAnimation(root, resizesMap, context, false));
+        }
+        if (data.edgeMorphs !== undefined && data.edgeMorphs.length > 0) {
+            const edgeMorphs: Map<string, ResolvedEdgeMorph> = new Map;
+            for (const morph of data.edgeMorphs) {
+                edgeMorphs.set(morph.edge.id, morph);
+            }
+            animations.push(new EdgeMorphAnimation(root, edgeMorphs, context));
         }
         return animations;
     }
