@@ -44,6 +44,7 @@ export interface RoutedPoint extends Point {
 export interface EdgeSnapshot {
     routingHandles: SRoutingHandle[]
     routingPoints: Point[]
+    routedPoints: RoutedPoint[]
     router: IEdgeRouter
     source?: SConnectableElement
     target?: SConnectableElement

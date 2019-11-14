@@ -21,7 +21,7 @@ import { CommandExecutionContext, CommandReturn, Command } from '../../base/comm
 import { FadeAnimation, ResolvedElementFade } from '../fade/fade';
 import { Action } from '../../base/actions/action';
 import { SModelRootSchema, SModelRoot, SChildElement, SModelElement, SParentElement } from "../../base/model/smodel";
-import { MoveAnimation, ResolvedElementMove } from "../move/move";
+import { MoveAnimation, ResolvedElementMove, MorphEdgesAnimation } from "../move/move";
 import { Fadeable, isFadeable } from "../fade/model";
 import { isLocateable } from "../move/model";
 import { isSizeable } from "../bounds/model";
@@ -31,9 +31,8 @@ import { MatchResult, ModelMatcher, Match, forEachMatch } from "./model-matching
 import { ResolvedElementResize, ResizeAnimation } from '../bounds/resize';
 import { TYPES } from "../../base/types";
 import { isViewport } from "../viewport/model";
-import { EdgeRouterRegistry, RoutedPoint } from "../routing/routing";
+import { EdgeRouterRegistry, EdgeSnapshot, EdgeMemento } from "../routing/routing";
 import { SRoutableElement } from "../routing/model";
-import { ResolvedEdgeMorph, EdgeMorphAnimation } from "./edge-morph-animation";
 
 /**
  * Sent from the model source to the client in order to update the model. If no model is present yet,
@@ -59,7 +58,7 @@ export interface UpdateAnimationData {
     fades: ResolvedElementFade[]
     moves?: ResolvedElementMove[]
     resizes?: ResolvedElementResize[]
-    edgeMorphs?: ResolvedEdgeMorph[]
+    edgeMementi?: EdgeMemento[]
 }
 
 @injectable()
@@ -244,13 +243,12 @@ export class UpdateModelCommand extends Command {
             }
         }
         if (left instanceof SRoutableElement && right instanceof SRoutableElement && this.edgeRouterRegistry) {
-            if (animationData.edgeMorphs === undefined)
-                animationData.edgeMorphs = [];
-            animationData.edgeMorphs.push({
+            if (animationData.edgeMementi === undefined)
+                animationData.edgeMementi = [];
+            animationData.edgeMementi.push({
                 edge: right,
-                fromRoutingPoints: this.route(left),
-                toRoutingPoints: this.route(right),
-                finalRoutingPoints: right.routingPoints
+                before: this.takeSnapshot(left),
+                after: this.takeSnapshot(right),
             });
         }
         if (isSelectable(left) && isSelectable(right)) {
@@ -265,9 +263,9 @@ export class UpdateModelCommand extends Command {
         }
     }
 
-    protected route(edge: SRoutableElement): RoutedPoint[] {
+    protected takeSnapshot(edge: SRoutableElement): EdgeSnapshot {
         const router = this.edgeRouterRegistry!.get(edge.routerKind);
-        return router.route(edge);
+        return router.takeSnapshot(edge);
     }
 
     protected createAnimations(data: UpdateAnimationData, root: SModelRoot, context: CommandExecutionContext): Animation[] {
@@ -289,12 +287,8 @@ export class UpdateModelCommand extends Command {
             }
             animations.push(new ResizeAnimation(root, resizesMap, context, false));
         }
-        if (data.edgeMorphs !== undefined && data.edgeMorphs.length > 0) {
-            const edgeMorphs: Map<string, ResolvedEdgeMorph> = new Map;
-            for (const morph of data.edgeMorphs) {
-                edgeMorphs.set(morph.edge.id, morph);
-            }
-            animations.push(new EdgeMorphAnimation(root, edgeMorphs, context));
+        if (data.edgeMementi  !== undefined && data.edgeMementi.length > 0) {
+            animations.push(new MorphEdgesAnimation(root, data.edgeMementi, context, false));
         }
         return animations;
     }

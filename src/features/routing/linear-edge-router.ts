@@ -311,6 +311,7 @@ export abstract class LinearEdgeRouter implements IEdgeRouter {
             routingHandles: edge.children
                 .filter(child => child instanceof SRoutingHandle)
                 .map(child => child as SRoutingHandle),
+            routedPoints: this.route(edge),
             router: this,
             source: edge.source,
             target: edge.target

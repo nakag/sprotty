@@ -28,12 +28,11 @@ import { CompoundAnimation, Animation } from "../../base/animations/animation";
 import { SNodeSchema, SGraphSchema, SEdgeSchema, SEdge } from "../../graph/sgraph";
 import { SGraphFactory } from "../../graph/sgraph-factory";
 import { FadeAnimation } from "../../features/fade/fade";
-import { MoveAnimation } from "../../features/move/move";
+import { MoveAnimation, MorphEdgesAnimation } from "../../features/move/move";
 import { UpdateModelCommand, UpdateModelAction } from "./update-model";
 import { ModelMatcher } from "./model-matching";
 import { ManhattanEdgeRouter } from "../routing/manhattan-edge-router";
 import defaultModule from "../../base/di.config";
-import { EdgeMorphAnimation } from './edge-morph-animation';
 import { Point } from '../../utils/geometry';
 import { EdgeRouterRegistry } from '../routing/routing';
 import { AnchorComputerRegistry } from '../routing/anchor';
@@ -366,7 +365,7 @@ describe('UpdateModelCommand', () => {
             newRoot: newModelWithEdge(edgeId, [{ x: 136, y: 0 }])
         }, edgeRouterRegistry);
         const animation1 = command1.testAnimation(context.root, context);
-        expect(animation1).to.be.instanceof(EdgeMorphAnimation);
+        expect(animation1).to.be.instanceof(MorphEdgesAnimation);
         if (animation1 instanceof Animation) {
             animation1.tween(0, context);
             const edge = context.root.index.getById(edgeId) as SEdge;
@@ -390,7 +389,7 @@ describe('UpdateModelCommand', () => {
             newRoot: newModelWithEdge(edgeId, [{ x: 32, y: 0 }, { x: 32, y: 32 }, { x: 64, y: 32 }, { x:64, y: 128 }])
         }, edgeRouterRegistry);
         const animation2 = command2.testAnimation(context.root, context);
-        expect(animation2).to.be.instanceof(EdgeMorphAnimation);
+        expect(animation2).to.be.instanceof(MorphEdgesAnimation);
         if (animation2 instanceof Animation) {
             animation2.tween(0, context);
             const edge = context.root.index.getById(edgeId) as SEdge;
